@@ -1,0 +1,48 @@
+name: Release new version
+
+# on:
+#     push:
+#         tags:
+#             - "v*.*.*"
+
+permissions:
+    contents: write
+
+jobs:
+    package-delivery:
+        permissions:
+            contents: read
+
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/create-github-app-token@v1
+              id: generate-ci-app-token
+              with:
+                  app-id: ${{ vars.CI_APP_ID }}
+                  private-key: ${{ secrets.CI_APP_KEY }}
+
+            - uses: actions/github-script@v7
+              id: publish-release
+              with:
+                  github-token: ${{ steps.generate-ci-app-token.outputs.token }}
+                  script: |
+
+                      const response = await github.request(
+                        'POST /repos/{owner}/{repo}/releases',
+                        {
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          draft: false,
+                          tag_name: '${{ github.ref }}',
+                          generate_release_notes: true,
+                          make_latest: 'true',
+                          headers: {
+                            'X-GitHub-Api-Version': '2022-11-28'
+                          }
+                        }
+                      );
+
+                      console.dir(response);
+
+                      return response.data.id;

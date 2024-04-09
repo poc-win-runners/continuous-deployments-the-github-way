@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+
+az logout || true
+az login --use-device-code
+
+main_bicep="${SCRIPT_DIR}/main.bicep"
+parameters_json="${SCRIPT_DIR}/parameters.json"
+
+location="$(jq -r .parameters.location.value "${parameters_json}")"
+
+deployment_outputs_json="${SCRIPT_DIR}/deployment-outputs.json"
+
+az deployment sub create \
+    --name "universe24-continuous-deployment-with-github-${location}" \
+    --location "${location}" \
+    --parameters @"${parameters_json}" \
+    --template-file "${main_bicep}" \
+    --output json >"${deployment_outputs_json}"

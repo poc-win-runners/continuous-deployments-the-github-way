@@ -1,0 +1,26 @@
+// To learn more about this configuration, see the following references
+// - https://aka.ms/configure-codespace
+// - https://aka.ms/devcontainer.json
+// - https://github.com/devcontainers/templates/tree/main/src/ubuntu
+// - https://containers.dev/guide/dockerfile
+// - https://aka.ms/ghcs-default-image
+{
+    "features": {
+        "ghcr.io/devcontainers/features/azure-cli:1": {
+            "installBicep": true,
+            "version": "latest"
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "Github.copilot",
+                "github.copilot-chat",
+                "github.vscode-github-actions",
+                "GitHub.vscode-pull-request-github",
+                "ms-azuretools.vscode-bicep",
+                "ms-vscode.azurecli"
+            ]
+        }
+    }
+}

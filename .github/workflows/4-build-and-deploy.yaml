@@ -1,0 +1,29 @@
+name: Build Docker image of application and deploy
+
+# on:
+#     release:
+#         types:
+#             - released
+
+permissions:
+  attestations: write
+  checks: write
+  contents: read
+  id-token: write
+
+jobs:
+    build:
+        uses: demos-by-igwejk/platform-library-workflows/.github/workflows/reusable-build.yaml@main
+        with:
+            image-name: app
+            tag-name: ${{ github.event.release.tag_name }}
+            environment: staging
+            build-directory: app
+
+    deploy:
+        uses: demos-by-igwejk/platform-library-workflows/.github/workflows/reusable-deployment.yaml@main
+        needs: build
+        with:
+            image-name: app
+            image-tag: ${{ github.event.release.tag_name }}
+            environment: staging

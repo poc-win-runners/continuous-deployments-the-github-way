@@ -1,0 +1,9 @@
+{
+    "name": "staging",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:${GITHUB_REPOSITORY}:environment:staging",
+    "description": "OIDC Description",
+    "audiences": [
+        "api://AzureADTokenExchange"
+    ]
+}

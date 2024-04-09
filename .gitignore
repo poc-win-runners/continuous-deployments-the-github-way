@@ -1,0 +1,8 @@
+.DS_Store
+.vscode/settings.json
+github-pages
+site
+workshop-site
+node_modules
+bundle.*js
+deployment-outputs.json

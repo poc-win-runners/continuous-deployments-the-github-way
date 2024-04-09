@@ -1,0 +1,47 @@
+name: Check Pull Requests [Workshop]
+
+# on:
+#     pull_request:
+#         branches:
+#             - main
+
+permissions:
+    id-token: write
+    contents: read
+    checks: write
+    pull-requests: write
+
+jobs:
+    check-pull-request:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Dependency review
+              uses: actions/dependency-review-action@v4
+              with:
+                  config-file: >-
+                      ./.github/dependency-review-config.yml
+
+            - name: Build
+              working-directory: app
+              run: |
+                  docker build -t app .
+            - name: Run
+              run: |
+                  docker run -d -p 8080:80 app
+            - name: Health check
+              run: |
+                  curl \
+                    --head \
+                    --request GET \
+                    --retry 10 \
+                    --retry-delay 1 \
+                    --retry-max-time 10 \
+                    --retry-all-errors \
+                    http://localhost:8080
+
+            - name: Run tests
+              run: |
+                  curl -Ls http://localhost:8080?name=hello
