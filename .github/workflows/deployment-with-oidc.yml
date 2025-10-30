@@ -103,7 +103,7 @@ jobs:
               containers:
                 - name: runner
                   image: ghcr.io/poc-win-runners/arc-windows-runner:v2.329.0
-                  command: ["cmd.exe", "/c", "\\home\\runner\\run.cmd"]
+                  command: ['cmd.exe', '/c', '\\home\\runner\\run.cmd']
               tolerations:
                 - key: kubernetes.io/os
                   operator: Equal
