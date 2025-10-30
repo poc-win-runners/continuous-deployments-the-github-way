@@ -19,14 +19,19 @@ jobs:
     steps:
       - name: Validate required variables
         run: |
-          req_vars=(AWS_REGION AWS_ACCOUNT_ID ECR_REPOSITORY)
           missing=0
-          for v in "${req_vars[@]}"; do
-            if [ -z "${{ vars[$v] }}" ]; then
-              echo "::error::Repository variable '$v' is not set."
-              missing=1
-            fi
-          done
+          if [ -z "${{ vars.AWS_REGION }}" ]; then
+            echo "::error::Repository variable 'AWS_REGION' is not set."
+            missing=1
+          fi
+          if [ -z "${{ vars.AWS_ACCOUNT_ID }}" ]; then
+            echo "::error::Repository variable 'AWS_ACCOUNT_ID' is not set."
+            missing=1
+          fi
+          if [ -z "${{ vars.ECR_REPOSITORY }}" ]; then
+            echo "::error::Repository variable 'ECR_REPOSITORY' is not set."
+            missing=1
+          fi
           if [ -z "${{ vars.ROLE_ARN }}" ] && [ -z "${{ vars.ROLE_NAME }}" ]; then
             echo "::error::Set either ROLE_ARN or ROLE_NAME as a repository variable."
             missing=1
