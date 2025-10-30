@@ -1,0 +1,12 @@
+name: Win-Runner Self-Hosted on EKS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: arc-runner-set-eks
+
+    steps:
+    - name: Output
+      run: $PSVersionTable
