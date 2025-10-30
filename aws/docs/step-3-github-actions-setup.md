@@ -1,172 +1,171 @@
 # GitHub Actions Setup for AWS OIDC
 
-This document explains how to configure GitHub Actions to use OIDC authentication with AWS for secure deployments.
+This document explains how to configure GitHub Actions to use OIDC authentication with AWS for secure container builds and ECR pushes.
 
-## 🔐 GitHub Repository Secrets
+## GitHub Repository Variables
 
-After deploying the AWS infrastructure, you need to configure the following secrets in your GitHub repository.
+After deploying the AWS infrastructure, you need to configure the following variables in your GitHub repository.
 
-### Required Secrets
+### Required Variables
 
-Go to your GitHub repository → Settings → Secrets and variables → Actions → Repository secrets
+Go to your GitHub repository → Settings → Secrets and variables → Actions → Repository variables
 
-Add the following secrets:
+Add the following **variables**:
 
-| Secret Name | Description | Example Value |
+| Variable Name | Description | Example Value |
 |------------|-------------|---------------|
-| `AWS_REGION` | AWS region where resources are deployed | `us-east-1` |
-| `AWS_ROLE_ARN` | IAM Role ARN for GitHub Actions | `arn:aws:iam::123456789012:role/gh-universe24-github-actions-role` |
-| `ECR_REPOSITORY_URI` | ECR repository URI | `123456789012.dkr.ecr.us-east-1.amazonaws.com/gh-universe24-app` |
-| `ECS_CLUSTER_NAME` | ECS cluster name | `gh-universe24-cluster` |
-| `ECS_SERVICE_NAME` | ECS service name | `gh-universe24-service` |
+| `AWS_REGION` | AWS region where resources are deployed | `eu-central-1` |
+| `AWS_ACCOUNT_ID` | Your AWS account ID | `123456789012` |
+| `ECR_REPOSITORY` | ECR repository name | `oidc-poc-app` |
+| `ROLE_ARN` | Full IAM Role ARN for GitHub Actions | `arn:aws:iam::123456789012:role/oidc-poc-github-actions-role` |
 
-### Getting Secret Values
+### Alternative: Using ROLE_NAME
 
-After running the deployment script (`aws/day-0/provision.sh`), you'll find these values in:
-- Terminal output
-- `aws/day-0/stack-outputs.json` file
+Instead of `ROLE_ARN`, you can use:
+
+| Variable Name | Example Value |
+|------------|-------------|
+| `ROLE_NAME` | `oidc-poc-github-actions-role` |
+
+The workflow will construct the full ARN using your account ID.
+
+### Getting Variable Values
+
+After running the deployment script (`aws/provision.sh`), you'll find these values in the terminal output:
+
+```text
+🔑 GitHub Variables to configure:
+   AWS_ROLE_ARN: arn:aws:iam::123456789012:role/oidc-poc-github-actions-role
+   ECR_REPOSITORY_URI: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/oidc-poc-app
+   AWS_REGION: eu-central-1
+```
 
 ## 🚀 GitHub Actions Workflow
 
-Create `.github/workflows/deploy.yml` in your repository:
+The repository already includes `.github/workflows/push-ecr.yml` that demonstrates the minimal OIDC integration:
 
 ```yaml
-name: Deploy to AWS ECS
+name: Build & Push to ECR
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPOSITORY_URI: ${{ secrets.ECR_REPOSITORY_URI }}
-  ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
-  ECS_SERVICE_NAME: ${{ secrets.ECS_SERVICE_NAME }}
+  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
 
+env:
+  IMAGE_TAG: ${{ github.sha }}
+
 jobs:
-  deploy:
-    name: Deploy to ECS
+  build-and-push:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Validate required variables
+        run: |
+          missing=0
+          if [ -z "${{ vars.AWS_REGION }}" ]; then
+            echo "::error::Repository variable 'AWS_REGION' is not set."
+            missing=1
+          fi
+          if [ -z "${{ vars.AWS_ACCOUNT_ID }}" ]; then
+            echo "::error::Repository variable 'AWS_ACCOUNT_ID' is not set."
+            missing=1
+          fi
+          if [ -z "${{ vars.ECR_REPOSITORY }}" ]; then
+            echo "::error::Repository variable 'ECR_REPOSITORY' is not set."
+            missing=1
+          fi
+          if [ -z "${{ vars.ROLE_ARN }}" ] && [ -z "${{ vars.ROLE_NAME }}" ]; then
+            echo "::error::Set either ROLE_ARN or ROLE_NAME as a repository variable."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
 
-    - name: Configure AWS credentials using OIDC
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        role-session-name: github-actions-session
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.ROLE_ARN || format('arn:aws:iam::{0}:role/{1}', vars.AWS_ACCOUNT_ID, vars.ROLE_NAME) }}
 
-    - name: Build, tag, and push image to Amazon ECR
-      id: build-image
-      working-directory: ./app
-      env:
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        docker build -t $ECR_REPOSITORY_URI:$IMAGE_TAG .
-        docker push $ECR_REPOSITORY_URI:$IMAGE_TAG
-        echo "image=$ECR_REPOSITORY_URI:$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Download task definition
-      run: |
-        aws ecs describe-task-definition \
-          --task-definition gh-universe24-app \
-          --query taskDefinition > task-definition.json
+      - name: Build, tag, and push image
+        run: |
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          REPO="${{ vars.ECR_REPOSITORY }}"
+          IMAGE="${REGISTRY}/${REPO}:${IMAGE_TAG}"
+          LATEST="${REGISTRY}/${REPO}:latest"
 
-    - name: Fill in the new image ID in the Amazon ECS task definition
-      id: task-def
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: task-definition.json
-        container-name: gh-universe24-app
-        image: ${{ steps.build-image.outputs.image }}
+          echo "Building ${IMAGE}"
+          docker build -t "${IMAGE}" -t "${LATEST}" ./app
 
-    - name: Deploy Amazon ECS task definition
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-      with:
-        task-definition: ${{ steps.task-def.outputs.task-definition }}
-        service: ${{ env.ECS_SERVICE_NAME }}
-        cluster: ${{ env.ECS_CLUSTER_NAME }}
-        wait-for-service-stability: true
+          echo "Pushing ${IMAGE} and ${LATEST}"
+          docker push "${IMAGE}"
+          docker push "${LATEST}"
+
+      - name: Show pushed images
+        run: |
+          aws ecr describe-images \
+            --repository-name "${{ vars.ECR_REPOSITORY }}" \
+            --query 'imageDetails[].imageTags' --output table
 ```
 
-## 🔍 OIDC Configuration Details
+## OIDC Configuration Details
 
 The OIDC integration works as follows:
 
 1. **Identity Provider**: GitHub's OIDC provider (`https://token.actions.githubusercontent.com`)
 2. **Trust Policy**: Allows GitHub Actions from your specific repository
-3. **Permissions**: IAM role has permissions for ECS and ECR operations
+3. **Permissions**: IAM role has permissions for ECR operations only
 
 ### Trust Relationship
 
 The IAM role trusts GitHub Actions with these conditions:
+
 - `aud`: Must be `sts.amazonaws.com`
 - `sub`: Must match `repo:OWNER/REPO:*` pattern
 
-## 🧪 Testing the Setup
+### Key Security Features
 
-1. **Push code to main branch** - This triggers the workflow
-2. **Check Actions tab** - Monitor the deployment progress
-3. **Verify deployment** - Check ECS service and load balancer
+- **No Long-term Credentials**: Uses short-lived OIDC tokens
+- **Repository-specific Trust**: Only your repository can assume the role
+- **Minimal Permissions**: Only ECR read/write access
+- **Automatic Validation**: Workflow validates all required variables
 
-### Verification Commands
+## Testing the Setup
+
+### Manual Trigger
+
+1. Go to your repository → Actions tab
+2. Select "Build & Push to ECR" workflow
+3. Click "Run workflow" button
+4. Monitor the execution
+
+## 📋 Verification Commands
+
+After a successful workflow run:
 
 ```bash
-# Check ECS service status
-aws ecs describe-services \
-  --cluster gh-universe24-cluster \
-  --services gh-universe24-service
+# List images in your ECR repository
+aws ecr list-images --repository-name oidc-poc-app
 
-# Get load balancer DNS
-aws cloudformation describe-stacks \
-  --stack-name gh-universe24-github-oidc-workshop \
-  --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDNS`].OutputValue' \
-  --output text
+# Describe specific image
+aws ecr describe-images --repository-name oidc-poc-app --image-ids imageTag=latest
+
+# Check image details
+aws ecr describe-images \
+  --repository-name oidc-poc-app \
+  --query 'imageDetails[0].[imagePushedAt,imageSizeInBytes,imageTags]' \
+  --output table
 ```
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-1. **Permission Denied**
-   - Verify IAM role ARN is correct
-   - Check trust policy includes your repository
-
-2. **ECR Authentication Failed**
-   - Ensure ECR permissions are attached to the role
-   - Verify repository URI format
-
-3. **ECS Deployment Failed**
-   - Check task definition is valid
-   - Verify container image exists in ECR
-   - Review ECS service logs
-
-### Debug Steps
-
-1. Enable GitHub Actions debug logging:
-   ```
-   ACTIONS_STEP_DEBUG: true
-   ACTIONS_RUNNER_DEBUG: true
-   ```
-
-2. Check AWS CloudTrail for API calls
-3. Review ECS service events and CloudWatch logs
-
-## 📚 Additional Resources
-
-- [AWS IAM OIDC](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
-- [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
-- [AWS ECS Deploy Action](https://github.com/aws-actions/amazon-ecs-deploy-task-definition)

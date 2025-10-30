@@ -1,102 +1,143 @@
-# AWS Infrastructure Setup with CloudFormation
+# AWS Infrastructure Setup with CloudFormation - Minimal PoC
 
-This document explains how to provision AWS infrastructure equivalent to the Azure setup, using CloudFormation templates.
+This document explains how to provision minimal AWS infrastructure for GitHub Actions OIDC integration using a single CloudFormation template.
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
-The AWS infrastructure mirrors the Azure setup:
+The minimal AWS infrastructure includes only essential components for OIDC authentication:
 
-| Azure Service | AWS Equivalent |
-|---------------|----------------|
-| Azure App Service | Amazon ECS Fargate |
-| Azure Container Registry | Amazon ECR |
-| Azure Resource Group | CloudFormation Stack |
-| Azure AD App Registration | IAM OIDC Identity Provider + Role |
+| Component | Purpose |
+|-----------|---------|
+| Amazon ECR | Container registry (equivalent to Azure Container Registry) |
+| IAM OIDC Identity Provider | GitHub Actions authentication endpoint |
+| IAM Role | Federated access role for GitHub Actions |
 
-## 📁 Infrastructure Structure
+## Deployment Process
 
+### Step 1: Review Configuration
+
+The `parameters.json` file contains your repository-specific settings:
+
+```json
+[
+  {
+    "ParameterKey": "GitHubOrg",
+    "ParameterValue": "your-github-username"
+  },
+  {
+    "ParameterKey": "GitHubRepo", 
+    "ParameterValue": "your-repository-name"
+  },
+  {
+    "ParameterKey": "ProjectPrefix",
+    "ParameterValue": "oidc-poc"
+  }
+]
 ```
-aws/
-├── day-0/
-│   ├── main.yaml                    # Main CloudFormation template
-│   ├── parameters.json              # Parameter values
-│   ├── provision.sh                 # Deployment script
-│   ├── 1-vpc-networking.yaml        # VPC and networking resources
-│   ├── 2-ecr-repository.yaml        # ECR container registry
-│   ├── 3-ecs-cluster.yaml          # ECS cluster and service
-│   ├── 4-oidc-github-integration.yaml # GitHub OIDC setup
-│   └── 5-load-balancer.yaml        # Application Load Balancer
-└── day-1/
-    └── oidc-config.json            # OIDC configuration for GitHub Actions
-```
-
-## 🚀 Deployment Process
-
-### Step 1: Configure Parameters
-
-Edit `aws/day-0/parameters.json` with your specific values:
-- AWS region
-- GitHub repository details
-- Application settings
 
 ### Step 2: Run Deployment Script
 
 ```bash
-cd aws/day-0
+cd aws
 chmod +x provision.sh
 ./provision.sh
 ```
 
-### Step 3: Verify Deployment
+The script will:
 
-The script will output important values needed for GitHub Actions configuration.
+1. Prompt for your GitHub organization and repository
+2. Update the parameters file
+3. Deploy the CloudFormation stack
+4. Output configuration values for GitHub
 
-## 🔧 What Gets Created
+### Step 3: Note the Outputs
 
-1. **VPC and Networking**
-   - Virtual Private Cloud
-   - Public and private subnets
-   - Internet Gateway
-   - NAT Gateway
-   - Route tables
+After successful deployment, you'll see:
 
-2. **Container Registry (ECR)**
-   - Private ECR repository for the application
-   - IAM policies for push/pull access
+```text
+🔑 GitHub Variables to configure:
+   AWS_ROLE_ARN: arn:aws:iam::123456789012:role/oidc-poc-github-actions-role
+   ECR_REPOSITORY_URI: 123456789012.dkr.ecr.eu-central-1.amazonaws.com/oidc-poc-app
+   AWS_REGION: eu-central-1
+```
 
-3. **ECS Infrastructure**
-   - ECS cluster
-   - ECS service definition
-   - Task definition for the containerized app
-   - IAM execution role
+## What Gets Created
 
-4. **Load Balancer**
-   - Application Load Balancer
-   - Target group
-   - Security groups
+### 1. ECR Repository
 
-5. **GitHub OIDC Integration**
-   - IAM OIDC Identity Provider
-   - IAM role for GitHub Actions
-   - Policies for ECS and ECR access
+- **Purpose**: Store container images
+- **Name**: `{ProjectPrefix}-app` (e.g., `oidc-poc-app`)
+- **Features**: Image scanning, lifecycle policy (keeps last 5 images)
 
-## 📊 Outputs
+### 2. IAM OIDC Identity Provider
 
-After deployment, the following outputs are available:
-- ECR repository URI
-- ECS cluster name
-- Load balancer DNS name
-- IAM role ARN for GitHub Actions
-- OIDC provider ARN
+- **Purpose**: Trust GitHub's token issuer
+- **URL**: `https://token.actions.githubusercontent.com`
+- **Audience**: `sts.amazonaws.com`
+- **Thumbprints**: GitHub's certificate fingerprints
 
-## 🧹 Cleanup
+### 3. IAM Role for GitHub Actions
 
-To remove all resources:
+- **Purpose**: Federated access for GitHub Actions
+- **Trust Policy**: Only your specific repository
+- **Permissions**: ECR read/write access
+- **Condition**: Must use correct audience and repository path
+
+## Security Configuration
+
+### Trust Relationship
+
+The IAM role trusts GitHub Actions with strict conditions:
+
+```json
+{
+  "Effect": "Allow",
+  "Principal": {
+    "Federated": "arn:aws:iam::ACCOUNT:oidc-provider/token.actions.githubusercontent.com"
+  },
+  "Action": "sts:AssumeRoleWithWebIdentity",
+  "Condition": {
+    "StringEquals": {
+      "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+    },
+    "StringLike": {
+      "token.actions.githubusercontent.com:sub": "repo:ORG/REPO:*"
+    }
+  }
+}
+```
+
+### ECR Permissions
+
+The role has minimal ECR permissions:
+
+- Push/pull images from the specific repository
+- Get authentication tokens
+- Describe repositories and images
+
+## Stack Outputs
+
+| Output | Description | Used For |
+|--------|-------------|----------|
+| `ECRRepositoryURI` | Full ECR repository URI | Docker push/pull commands |
+| `GitHubActionsRoleArn` | IAM role ARN | GitHub Actions authentication |
+| `OIDCProviderArn` | OIDC provider ARN | Reference for other stacks |
+
+## 🧪 Verification
+
+After deployment, verify the setup:
 
 ```bash
-aws cloudformation delete-stack --stack-name github-oidc-workshop
+# Check CloudFormation stack
+aws cloudformation describe-stacks --stack-name oidc-poc-minimal
+
+# Verify ECR repository
+aws ecr describe-repositories --repository-names oidc-poc-app
+
+# Check IAM role
+aws iam get-role --role-name oidc-poc-github-actions-role
 ```
 
 ## Next Steps
 
-Proceed to [Step 3: GitHub Actions Configuration](step-3-github-actions-setup.md) to configure the CI/CD pipeline.
+Proceed to [Step 3: GitHub Actions Setup](step-3-github-actions-setup.md) to configure the CI/CD pipeline.
