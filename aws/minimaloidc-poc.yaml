@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Minimal GitHub Actions OIDC Integration PoC'
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: 'GitHub organization or username'
+  
+  GitHubRepo:
+    Type: String
+    Description: 'GitHub repository name'
+
+  ProjectPrefix:
+    Type: String
+    Default: 'oidc-poc'
+    Description: 'Prefix for all resource names'
+
+Resources:
+  # ECR Repository for container images
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ProjectPrefix}-app'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 5 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # GitHub OIDC Identity Provider
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: 'https://token.actions.githubusercontent.com'
+      ClientIdList:
+        - 'sts.amazonaws.com'
+      ThumbprintList:
+        - '6938fd4d98bab03faadb97b34396831e3780aea1'
+        - '1c58a3a8518e8759bf075b76b750d4f2df264fcd'
+
+  # IAM Role for GitHub Actions (the core of OIDC integration)
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-github-actions-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: 'sts:AssumeRoleWithWebIdentity'
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com'
+              StringLike:
+                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubOrg}/${GitHubRepo}:*'
+      Policies:
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchDeleteImage
+                  - ecr:ListImages
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                Resource: !GetAtt ECRRepository.Arn
+
+Outputs:
+  ECRRepositoryURI:
+    Description: 'ECR Repository URI for pushing images'
+    Value: !GetAtt ECRRepository.RepositoryUri
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRRepositoryURI'
+
+  GitHubActionsRoleArn:
+    Description: 'IAM Role ARN for GitHub Actions to assume'
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubActionsRoleArn'
+
+  OIDCProviderArn:
+    Description: 'OIDC Provider ARN'
+    Value: !Ref GitHubOIDCProvider
+    Export:
+      Name: !Sub '${AWS::StackName}-OIDCProviderArn'

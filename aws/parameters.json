@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "GitHubOrg",
+    "ParameterValue": "poc-win-runners"
+  },
+  {
+    "ParameterKey": "GitHubRepo",
+    "ParameterValue": "continuous-deployments-the-github-way"
+  },
+  {
+    "ParameterKey": "ProjectPrefix",
+    "ParameterValue": "oidc-poc"
+  }
+]

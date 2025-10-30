@@ -1,0 +1,69 @@
+name: Build & Push to ECR
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate required variables
+        run: |
+          req_vars=(AWS_REGION AWS_ACCOUNT_ID ECR_REPOSITORY)
+          missing=0
+          for v in "${req_vars[@]}"; do
+            if [ -z "${{ vars[$v] }}" ]; then
+              echo "::error::Repository variable '$v' is not set."
+              missing=1
+            fi
+          done
+          if [ -z "${{ vars.ROLE_ARN }}" ] && [ -z "${{ vars.ROLE_NAME }}" ]; then
+            echo "::error::Set either ROLE_ARN or ROLE_NAME as a repository variable."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.ROLE_ARN || format('arn:aws:iam::{0}:role/{1}', vars.AWS_ACCOUNT_ID, vars.ROLE_NAME) }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image
+        run: |
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          REPO="${{ vars.ECR_REPOSITORY }}"
+          IMAGE="${REGISTRY}/${REPO}:${IMAGE_TAG}"
+          LATEST="${REGISTRY}/${REPO}:latest"
+
+          echo "Building ${IMAGE}"
+          docker build -t "${IMAGE}" -t "${LATEST}" ./app
+
+          echo "Pushing ${IMAGE} and ${LATEST}"
+          docker push "${IMAGE}"
+          docker push "${LATEST}"
+
+      - name: Show pushed images
+        run: |
+          aws ecr describe-images \
+            --repository-name "${{ vars.ECR_REPOSITORY }}" \
+            --query 'imageDetails[].imageTags' --output table
