@@ -8,8 +8,6 @@ permissions:
   contents: read
 
 env:
-  ARC_SYS_NS: arc-systems
-  ARC_RUN_NS: arc-runners
   CONTROLLER_RELEASE: arc
   SCALESET_RELEASE: arc-runner-set-eks
 
