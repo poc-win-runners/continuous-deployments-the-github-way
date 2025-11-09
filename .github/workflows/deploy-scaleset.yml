@@ -67,7 +67,6 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -258,8 +257,8 @@ jobs:
         if: always()
         run: |
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Operation**: ${{ inputs.operation }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Scale Set**: ${{ inputs.scaleset_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Namespace**: $ARC_RUN_NS" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Config**: $GITHUB_CONFIG_URL" >> $GITHUB_STEP_SUMMARY
           echo "- **Template**: ${{ inputs.template_file || 'Generated from parameters' }}" >> $GITHUB_STEP_SUMMARY
