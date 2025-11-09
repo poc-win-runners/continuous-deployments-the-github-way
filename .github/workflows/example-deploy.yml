@@ -15,20 +15,11 @@ on:
         default: 'templates/windows-standard.yaml'
       
       # Scale Set Configuration
-      team_name:
-        description: 'Team name'
+      runners_namespace:
+        description: 'Runners namespace'
         required: true
         type: string
-        default: 'platform-team'
-      environment:
-        description: 'Environment'
-        required: true
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
-        default: 'dev'
+        default: 'runners'
       scaleset_name:
         description: 'Scale set release name'
         required: true
@@ -39,11 +30,6 @@ on:
         required: false
         type: string
         default: 'ghcr.io/poc-win-runners/arc-windows-runner:v2.329.0'
-      github_config_url:
-        description: 'GitHub config URL (org/repo/enterprise)'
-        required: true
-        type: string
-        default: 'https://github.com/poc-win-runners'
       
       # Infrastructure
       aws_region:

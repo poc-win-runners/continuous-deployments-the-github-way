@@ -10,12 +10,8 @@ on:
         type: string
       
       # Option 2: Provide parameters directly
-      team_name:
-        description: 'Team name (used for namespace: arc-{team}-{env})'
-        required: true
-        type: string
-      environment:
-        description: 'Environment (dev/staging/prod)'
+      runners_namespace:
+        description: 'Runners namespace (used for namespace: arc-{runners_namespace})'
         required: true
         type: string
       scaleset_name:
@@ -25,10 +21,6 @@ on:
       runner_image:
         description: 'Runner container image'
         required: false
-        type: string
-      github_config_url:
-        description: 'GitHub config URL (org, repo, or enterprise level)'
-        required: true
         type: string
       
       # Infrastructure
@@ -104,13 +96,17 @@ jobs:
         run: |
           aws eks update-kubeconfig --name "${{ inputs.cluster_name }}" --region "${{ inputs.aws_region }}"
 
-      - name: Setup namespaces
+      - name: Setup namespaces and GitHub config
         run: |
           ARC_SYS_NS="${{ inputs.arc_systems_namespace }}"
-          ARC_RUN_NS="arc-${{ inputs.team_name }}-${{ inputs.environment }}-scale-set"
+          ARC_RUN_NS="arc-${{ inputs.runners_namespace }}"
+          GITHUB_CONFIG_URL="https://github.com/${{ github.repository_owner }}"
           
           echo "ARC_SYS_NS=$ARC_SYS_NS" >> $GITHUB_ENV
           echo "ARC_RUN_NS=$ARC_RUN_NS" >> $GITHUB_ENV
+          echo "GITHUB_CONFIG_URL=$GITHUB_CONFIG_URL" >> $GITHUB_ENV
+          
+          echo "Using GitHub organization URL: $GITHUB_CONFIG_URL"
           
           kubectl create ns "$ARC_SYS_NS" --dry-run=client -o yaml | kubectl apply -f -
           kubectl create ns "$ARC_RUN_NS" --dry-run=client -o yaml | kubectl apply -f -
@@ -188,7 +184,7 @@ jobs:
             # Override template values with dynamic parameters
             yq eval -i ".controllerServiceAccount.name = \"$CONTROLLER_SERVICE_ACCOUNT\"" values-scaleset.yaml
             yq eval -i ".controllerServiceAccount.namespace = \"$ARC_SYS_NS\"" values-scaleset.yaml
-            yq eval -i ".githubConfigUrl = \"${{ inputs.github_config_url }}\"" values-scaleset.yaml
+            yq eval -i ".githubConfigUrl = \"$GITHUB_CONFIG_URL\"" values-scaleset.yaml
             yq eval -i ".githubConfigSecret = \"${{ inputs.github_secret_name }}\"" values-scaleset.yaml
             
             if [[ -n "${{ inputs.runner_image }}" ]]; then
@@ -228,7 +224,7 @@ jobs:
                             values:
                               - windows
 
-          githubConfigUrl: ${{ inputs.github_config_url }}
+          githubConfigUrl: $GITHUB_CONFIG_URL
           githubConfigSecret: ${{ inputs.github_secret_name }}
           EOF
           fi
@@ -262,7 +258,6 @@ jobs:
         if: always()
         run: |
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Team**: ${{ inputs.team_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Operation**: ${{ inputs.operation }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Scale Set**: ${{ inputs.scaleset_name }}" >> $GITHUB_STEP_SUMMARY
