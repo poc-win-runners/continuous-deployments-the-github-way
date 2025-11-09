@@ -73,8 +73,7 @@ jobs:
     uses: ./.github/workflows/deploy-scaleset.yml
     with:
       template_file: ${{ inputs.use_template && inputs.template_file || '' }}
-      team_name: ${{ inputs.team_name }}
-      environment: ${{ inputs.environment }}
+      runners_namespace: ${{ inputs.runners_namespace }}
       scaleset_name: ${{ inputs.scaleset_name }}
       runner_image: ${{ inputs.runner_image }}
       github_config_url: ${{ inputs.github_config_url }}
