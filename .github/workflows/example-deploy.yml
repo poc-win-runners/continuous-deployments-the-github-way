@@ -98,7 +98,7 @@ jobs:
       github_secret_name: ${{ inputs.github_secret_name }}
       operation: ${{ inputs.operation }}
     secrets:
-      ROLE_ARN: ${{ secrets.ROLE_ARN }}
+      ROLE_ARN: ${{ vars.ROLE_ARN }}
       GH_APP_ID: ${{ secrets.GH_APP_ID }}
       GH_INSTALLATION_ID: ${{ secrets.GH_INSTALLATION_ID }}
       GH_PRIVATE_KEY: ${{ secrets.GH_PRIVATE_KEY }}
