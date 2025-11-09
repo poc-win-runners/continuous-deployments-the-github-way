@@ -82,7 +82,8 @@ jobs:
       github_secret_name: ${{ inputs.github_secret_name }}
       operation: ${{ inputs.operation }}
     secrets:
-      ROLE_ARN: ${{ vars.ROLE_ARN }}
+      ROLE_NAME: ${{ vars.ROLE_NAME }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
       GH_APP_ID: ${{ secrets.GH_APP_ID }}
       GH_INSTALLATION_ID: ${{ secrets.GH_INSTALLATION_ID }}
       GH_PRIVATE_KEY: ${{ secrets.GH_PRIVATE_KEY }}
