@@ -31,3 +31,4 @@ template:
 
 githubConfigUrl: https://github.com/YOUR_ORG/YOUR_REPO
 githubConfigSecret: gha-runner-secret
+minRunners: 1
