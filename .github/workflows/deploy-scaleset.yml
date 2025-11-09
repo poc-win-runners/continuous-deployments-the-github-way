@@ -1,0 +1,270 @@
+name: Deploy ARC Scale Set (Self-Service)
+
+on:
+  workflow_call:
+    inputs:
+      # Option 1: Use a template file from the repo
+      template_file:
+        description: 'Path to values template file (e.g., templates/windows-standard.yaml). Leave empty to use parameters.'
+        required: false
+        type: string
+      
+      # Option 2: Provide parameters directly
+      team_name:
+        description: 'Team name (used for namespace: arc-{team}-{env})'
+        required: true
+        type: string
+      environment:
+        description: 'Environment (dev/staging/prod)'
+        required: true
+        type: string
+      scaleset_name:
+        description: 'Name for the scale set release'
+        required: true
+        type: string
+      runner_image:
+        description: 'Runner container image'
+        required: false
+        type: string
+      github_config_url:
+        description: 'GitHub config URL (org, repo, or enterprise level)'
+        required: true
+        type: string
+      
+      # Infrastructure
+      aws_region:
+        description: 'AWS region'
+        required: true
+        type: string
+      cluster_name:
+        description: 'EKS cluster name'
+        required: true
+        type: string
+      arc_systems_namespace:
+        description: 'Namespace for ARC controller'
+        required: false
+        type: string
+        default: 'arc-systems'
+      github_secret_name:
+        description: 'Name for the GitHub App credentials secret'
+        required: false
+        type: string
+        default: 'gha-runner-secret'
+      
+      # Operation
+      operation:
+        description: 'Operation: deploy, upgrade, or uninstall'
+        required: false
+        type: string
+        default: 'deploy'
+    
+    secrets:
+      ROLE_ARN:
+        required: true
+      GH_APP_ID:
+        required: true
+      GH_INSTALLATION_ID:
+        required: true
+      GH_PRIVATE_KEY:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ secrets.ROLE_ARN }}
+
+      - name: Install kubectl, helm, and yq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y unzip
+          # kubectl
+          curl -sSLo kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+          # helm
+          curl -sSL https://get.helm.sh/helm-v3.15.2-linux-amd64.tar.gz | tar zx
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+          # yq
+          curl -sSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o yq
+          chmod +x yq && sudo mv yq /usr/local/bin/yq
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name "${{ inputs.cluster_name }}" --region "${{ inputs.aws_region }}"
+
+      - name: Setup namespaces
+        run: |
+          ARC_SYS_NS="${{ inputs.arc_systems_namespace }}"
+          ARC_RUN_NS="arc-${{ inputs.team_name }}-${{ inputs.environment }}-scale-set"
+          
+          echo "ARC_SYS_NS=$ARC_SYS_NS" >> $GITHUB_ENV
+          echo "ARC_RUN_NS=$ARC_RUN_NS" >> $GITHUB_ENV
+          
+          kubectl create ns "$ARC_SYS_NS" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create ns "$ARC_RUN_NS" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Check/Install ARC Controller
+        if: inputs.operation == 'deploy' || inputs.operation == 'upgrade'
+        run: |
+          CONTROLLER_RELEASE="arc"
+          
+          if helm list -n "$ARC_SYS_NS" | grep -q "$CONTROLLER_RELEASE"; then
+            echo "✅ ARC Controller already exists, using existing version"
+          else
+            echo "Installing ARC Controller (latest version)"
+            helm install "$CONTROLLER_RELEASE" \
+              --namespace "$ARC_SYS_NS" \
+              --create-namespace \
+              oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+            
+            sleep 5
+          fi
+          
+          CONTROLLER_VERSION=$(helm list -n "$ARC_SYS_NS" -o json | jq -r ".[] | select(.name==\"$CONTROLLER_RELEASE\") | .chart" | sed 's/gha-runner-scale-set-controller-//')
+          echo "CONTROLLER_VERSION=$CONTROLLER_VERSION" >> $GITHUB_ENV
+          echo "Controller version: $CONTROLLER_VERSION"
+          
+          # Dynamically discover the controller service account
+          SERVICE_ACCOUNT=$(kubectl get sa -n "$ARC_SYS_NS" -o json | jq -r '.items[].metadata.name' | grep -E '(arc-gha-rs-controller|gha-rs-controller|arc-controller-gha-rs-controller)' | head -n 1)
+          
+          if [[ -z "$SERVICE_ACCOUNT" ]]; then
+            echo "❌ Could not find ARC controller service account in namespace $ARC_SYS_NS"
+            exit 1
+          fi
+          
+          echo "CONTROLLER_SERVICE_ACCOUNT=$SERVICE_ACCOUNT" >> $GITHUB_ENV
+          echo "Service account: $SERVICE_ACCOUNT"
+
+      - name: Create GitHub App secret
+        if: inputs.operation == 'deploy' || inputs.operation == 'upgrade'
+        env:
+          GITHUB_APP_ID: ${{ secrets.GH_APP_ID }}
+          GITHUB_APP_INSTALLATION_ID: ${{ secrets.GH_INSTALLATION_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GH_PRIVATE_KEY }}
+        run: |
+          SECRET_NAME="${{ inputs.github_secret_name }}"
+          
+          echo "$GITHUB_APP_PRIVATE_KEY" > github_app_private_key.pem
+          kubectl create secret generic "$SECRET_NAME" \
+            --namespace="$ARC_RUN_NS" \
+            --from-literal=github_app_id="$GITHUB_APP_ID" \
+            --from-literal=github_app_installation_id="$GITHUB_APP_INSTALLATION_ID" \
+            --from-file=github_app_private_key=./github_app_private_key.pem \
+            --dry-run=client -o yaml | kubectl apply -f -
+          rm github_app_private_key.pem
+
+      - name: Configure RBAC for ARC Scale Sets
+        if: inputs.operation == 'deploy' || inputs.operation == 'upgrade'
+        run: |
+          kubectl create rolebinding arc-rs-controller-admin \
+            -n "$ARC_RUN_NS" \
+            --clusterrole=admin \
+            --serviceaccount="$ARC_SYS_NS:$CONTROLLER_SERVICE_ACCOUNT" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Prepare values file
+        if: inputs.operation == 'deploy' || inputs.operation == 'upgrade'
+        run: |
+          if [[ -n "${{ inputs.template_file }}" ]]; then
+            echo "Using template file: ${{ inputs.template_file }}"
+            if [[ ! -f "${{ inputs.template_file }}" ]]; then
+              echo "ERROR: Template file not found: ${{ inputs.template_file }}"
+              exit 1
+            fi
+            cp "${{ inputs.template_file }}" values-scaleset.yaml
+            
+            # Override template values with dynamic parameters
+            yq eval -i ".controllerServiceAccount.name = \"$CONTROLLER_SERVICE_ACCOUNT\"" values-scaleset.yaml
+            yq eval -i ".controllerServiceAccount.namespace = \"$ARC_SYS_NS\"" values-scaleset.yaml
+            yq eval -i ".githubConfigUrl = \"${{ inputs.github_config_url }}\"" values-scaleset.yaml
+            yq eval -i ".githubConfigSecret = \"${{ inputs.github_secret_name }}\"" values-scaleset.yaml
+            
+            if [[ -n "${{ inputs.runner_image }}" ]]; then
+              yq eval -i ".template.spec.containers[0].image = \"${{ inputs.runner_image }}\"" values-scaleset.yaml
+            fi
+          else
+            echo "Generating values file from parameters"
+            cat > values-scaleset.yaml <<EOF
+          controllerServiceAccount:
+            name: $CONTROLLER_SERVICE_ACCOUNT
+            namespace: $ARC_SYS_NS
+
+          template:
+            spec:
+              nodeSelector:
+                kubernetes.io/os: windows
+              containers:
+                - name: runner
+                  image: ${{ inputs.runner_image }}
+                  command: ['cmd.exe', '/c', '\\home\\runner\\run.cmd']
+              tolerations:
+                - key: kubernetes.io/os
+                  operator: Equal
+                  value: windows
+                  effect: NoSchedule
+                - key: os
+                  operator: Equal
+                  value: windows
+                  effect: NoSchedule
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: kubernetes.io/os
+                            operator: In
+                            values:
+                              - windows
+
+          githubConfigUrl: ${{ inputs.github_config_url }}
+          githubConfigSecret: ${{ inputs.github_secret_name }}
+          EOF
+          fi
+          
+          echo "Using values file:"
+          cat values-scaleset.yaml
+
+      - name: Deploy/Upgrade Scale Set
+        if: inputs.operation == 'deploy' || inputs.operation == 'upgrade'
+        run: |
+          CHART_VERSION_FLAG=""
+          if [[ -n "$CONTROLLER_VERSION" ]]; then
+            CHART_VERSION_FLAG="--version $CONTROLLER_VERSION"
+            echo "Using controller version $CONTROLLER_VERSION for scale set"
+          fi
+          
+          echo "Installing/Upgrading Scale Set: ${{ inputs.scaleset_name }}"
+          helm upgrade --install "${{ inputs.scaleset_name }}" \
+            -f values-scaleset.yaml \
+            --namespace "$ARC_RUN_NS" \
+            $CHART_VERSION_FLAG \
+            oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+      - name: Uninstall Scale Set
+        if: inputs.operation == 'uninstall'
+        run: |
+          echo "Uninstalling Scale Set: ${{ inputs.scaleset_name }}"
+          helm uninstall "${{ inputs.scaleset_name }}" --namespace "$ARC_RUN_NS" || echo "Scale set not found"
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Team**: ${{ inputs.team_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Operation**: ${{ inputs.operation }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scale Set**: ${{ inputs.scaleset_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Namespace**: $ARC_RUN_NS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Template**: ${{ inputs.template_file || 'Generated from parameters' }}" >> $GITHUB_STEP_SUMMARY

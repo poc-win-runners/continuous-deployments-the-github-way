@@ -1,0 +1,104 @@
+name: Example - Deploy Scale Set
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_template:
+        description: 'Use template file instead of parameters'
+        required: true
+        type: boolean
+        default: false
+      template_file:
+        description: 'Path to template file (if use_template is true)'
+        required: false
+        type: string
+        default: 'templates/windows-standard.yaml'
+      
+      # Scale Set Configuration
+      team_name:
+        description: 'Team name'
+        required: true
+        type: string
+        default: 'platform-team'
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: 'dev'
+      scaleset_name:
+        description: 'Scale set release name'
+        required: true
+        type: string
+        default: 'my-scale-set'
+      runner_image:
+        description: 'Runner container image'
+        required: false
+        type: string
+        default: 'ghcr.io/poc-win-runners/arc-windows-runner:v2.329.0'
+      github_config_url:
+        description: 'GitHub config URL (org/repo/enterprise)'
+        required: true
+        type: string
+        default: 'https://github.com/poc-win-runners'
+      
+      # Infrastructure
+      aws_region:
+        description: 'AWS region'
+        required: true
+        type: string
+        default: 'us-east-1'
+      cluster_name:
+        description: 'EKS cluster name'
+        required: true
+        type: string
+        default: 'arc-cluster'
+      arc_systems_namespace:
+        description: 'ARC controller namespace'
+        required: false
+        type: string
+        default: 'arc-systems'
+      github_secret_name:
+        description: 'GitHub App secret name'
+        required: false
+        type: string
+        default: 'gha-runner-secret'
+      
+      # Operation
+      operation:
+        description: 'Operation to perform'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - upgrade
+          - uninstall
+        default: 'deploy'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-scaleset.yml
+    with:
+      template_file: ${{ inputs.use_template && inputs.template_file || '' }}
+      team_name: ${{ inputs.team_name }}
+      environment: ${{ inputs.environment }}
+      scaleset_name: ${{ inputs.scaleset_name }}
+      runner_image: ${{ inputs.runner_image }}
+      github_config_url: ${{ inputs.github_config_url }}
+      aws_region: ${{ inputs.aws_region }}
+      cluster_name: ${{ inputs.cluster_name }}
+      arc_systems_namespace: ${{ inputs.arc_systems_namespace }}
+      github_secret_name: ${{ inputs.github_secret_name }}
+      operation: ${{ inputs.operation }}
+    secrets:
+      ROLE_ARN: ${{ secrets.ROLE_ARN }}
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_INSTALLATION_ID: ${{ secrets.GH_INSTALLATION_ID }}
+      GH_PRIVATE_KEY: ${{ secrets.GH_PRIVATE_KEY }}
