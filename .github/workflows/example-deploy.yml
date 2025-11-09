@@ -76,7 +76,6 @@ jobs:
       runners_namespace: ${{ inputs.runners_namespace }}
       scaleset_name: ${{ inputs.scaleset_name }}
       runner_image: ${{ inputs.runner_image }}
-      github_config_url: ${{ inputs.github_config_url }}
       aws_region: ${{ inputs.aws_region }}
       cluster_name: ${{ inputs.cluster_name }}
       arc_systems_namespace: ${{ inputs.arc_systems_namespace }}
