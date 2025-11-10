@@ -1,10 +1,7 @@
 name: Version changes to the main branch
 
-# on:
-#     push:
-#         branches:
-#             - main
-#     workflow_dispatch: {}
+on:
+  workflow_dispatch:
 
 jobs:
     version-main-branch-changes:

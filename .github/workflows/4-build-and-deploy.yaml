@@ -1,9 +1,7 @@
 name: Build Docker image of application and deploy
 
-# on:
-#     release:
-#         types:
-#             - released
+on:
+  workflow_dispatch:
 
 permissions:
   attestations: write
