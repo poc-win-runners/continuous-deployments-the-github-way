@@ -5,7 +5,7 @@ on:
 
 jobs:
   test:
-    runs-on: arc-runner-set-eks
+    runs-on: arc-runners-set-demo
 
     steps:
     - name: Output
