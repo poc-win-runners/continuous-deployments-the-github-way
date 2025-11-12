@@ -5,7 +5,7 @@ on:
 
 jobs:
   test:
-    runs-on: my-scale-set-test3
+    runs-on: my-scale-set
 
     steps:
     - name: Output
