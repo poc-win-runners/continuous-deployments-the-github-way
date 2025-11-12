@@ -5,7 +5,7 @@ on:
 
 jobs:
   test:
-    runs-on: arc-runners-set-demo
+    runs-on: my-scale-set-test3
 
     steps:
     - name: Output
